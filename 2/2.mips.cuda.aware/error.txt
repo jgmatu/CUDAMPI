@@ -1,0 +1,44 @@
+--------------------------------------------------------------------------
+The call to cuMemcpyAsync failed. This is a unrecoverable error and will
+cause the program to abort.
+  cuMemcpyAsync(0x7f711249d6a6, 0x10309a00004, 200) returned value 1
+Check the cuda.h file for what the return value means.
+--------------------------------------------------------------------------
+[megatron1:03973] *** Process received signal ***
+[megatron1:03973] Signal: Aborted (6)
+[megatron1:03973] Signal code:  (-6)
+[megatron1:03973] CUDA: Error in cuMemcpy: res=-1, dest=0x7f711249d6a6, src=0x10309a00004, size=200
+[megatron1:03973] [ 0] /lib/x86_64-linux-gnu/libpthread.so.0(+0x11390)[0x7f7126cd1390]
+[megatron1:03973] [ 1] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x38)[0x7f71263a5428]
+[megatron1:03973] [ 2] /lib/x86_64-linux-gnu/libc.so.6(abort+0x16a)[0x7f71263a702a]
+[megatron1:03973] [ 3] /usr/local/lib/libopen-pal.so.13(+0x3e685)[0x7f7125e4e685]
+[megatron1:03973] [ 4] /usr/local/lib/libopen-pal.so.13(opal_convertor_pack+0x176)[0x7f7125e455a6]
+[megatron1:03973] [ 5] /usr/local/lib/openmpi/mca_btl_smcuda.so(mca_btl_smcuda_sendi+0x2f1)[0x7f712184ffd1]
+[megatron1:03973] [ 6] /usr/local/lib/openmpi/mca_pml_ob1.so(+0x823f)[0x7f7120d9923f]
+[megatron1:03973] [ 7] /usr/local/lib/openmpi/mca_pml_ob1.so(mca_pml_ob1_send+0x3fa)[0x7f7120d9a16a]
+[megatron1:03973] [ 8] /usr/local/lib/libmpi.so.12(PMPI_Send+0x14b)[0x7f71271552db]
+[megatron1:03973] [ 9] ./slave[0x40312e]
+[megatron1:03973] [10] ./slave[0x402e2a]
+[megatron1:03973] [11] /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f7126390830]
+[megatron1:03973] [12] ./slave[0x402ed9]
+[megatron1:03973] *** End of error message ***
+[megatron1:03974] *** Process received signal ***
+[megatron1:03974] Signal: Aborted (6)
+[megatron1:03974] Signal code:  (-6)
+[megatron1:03974] CUDA: Error in cuMemcpy: res=-1, dest=0x7f0f33928b26, src=0x10309a00004, size=200
+[megatron1:03974] [ 0] /lib/x86_64-linux-gnu/libpthread.so.0(+0x11390)[0x7f0f480fa390]
+[megatron1:03974] [ 1] /lib/x86_64-linux-gnu/libc.so.6(gsignal+0x38)[0x7f0f477ce428]
+[megatron1:03974] [ 2] /lib/x86_64-linux-gnu/libc.so.6(abort+0x16a)[0x7f0f477d002a]
+[megatron1:03974] [ 3] /usr/local/lib/libopen-pal.so.13(+0x3e685)[0x7f0f47277685]
+[megatron1:03974] [ 4] /usr/local/lib/libopen-pal.so.13(opal_convertor_pack+0x176)[0x7f0f4726e5a6]
+[megatron1:03974] [ 5] /usr/local/lib/openmpi/mca_btl_smcuda.so(mca_btl_smcuda_sendi+0x2f1)[0x7f0f3ebd1fd1]
+[megatron1:03974] [ 6] /usr/local/lib/openmpi/mca_pml_ob1.so(+0x823f)[0x7f0f3e11b23f]
+[megatron1:03974] [ 7] /usr/local/lib/openmpi/mca_pml_ob1.so(mca_pml_ob1_send+0x3fa)[0x7f0f3e11c16a]
+[megatron1:03974] [ 8] /usr/local/lib/libmpi.so.12(PMPI_Send+0x14b)[0x7f0f4857e2db]
+[megatron1:03974] [ 9] ./slave[0x40312e]
+[megatron1:03974] [10] ./slave[0x402e2a]
+[megatron1:03974] [11] /lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xf0)[0x7f0f477b9830]
+[megatron1:03974] [12] ./slave[0x402ed9]
+[megatron1:03974] *** End of error message ***
+--------------------------------------------------------------------------
+mpirun noticed that process rank 1 with PID 3973 on node megatron1 exited on signal 6 (Aborted).
