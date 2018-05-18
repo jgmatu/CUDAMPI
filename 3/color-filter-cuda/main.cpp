@@ -24,7 +24,7 @@ size_t numCols() { return imageInputRGBA.cols; }
 /*******  DEFINED IN func.cu *********/
 void create_filter(float **h_filter, int *filterWidth);
 
-void convolution(const uchar4 * const h_inputImageRGBA, uchar4 * const d_inputImageRGBA, uchar4* const d_outputImageRGBA,
+void convolution(uchar4 * const d_inputImageRGBA, uchar4* const d_outputImageRGBA,
                         const size_t numRows, const size_t numCols,
                         unsigned char *d_redFiltered,
                         unsigned char *d_greenFiltered,
@@ -33,7 +33,7 @@ void convolution(const uchar4 * const h_inputImageRGBA, uchar4 * const d_inputIm
 
 void allocateMemoryAndCopyToGPU(const size_t numRowsImage, const size_t numColsImage, const float* const h_filter, const size_t filterWidth);
 
-//****************************************************************************
+// ****************************************************************************
 // Also note that we've supplied a helpful debugging function called checkCudaErrors.
 // You should wrap your allocation and copying statements like we've done in the
 // code we're supplying you. Here is an example of the unsafe way to allocate
@@ -44,7 +44,7 @@ void allocateMemoryAndCopyToGPU(const size_t numRowsImage, const size_t numColsI
 // Here is an example of the safe way to do the same thing:
 //
 // checkCudaErrors(cudaMalloc(&d_red, sizeof(unsigned char) * numRows * numCols));
-//****************************************************************************
+// ****************************************************************************
 
 #define checkCudaErrors(val) check( (val), #val, __FILE__, __LINE__)
 
@@ -70,8 +70,7 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
                 float **h_filter, int *filterWidth,
                 const std::string &filename)
 {
-
-      //make sure the context initializes ok
+      // make sure the context initializes ok...
       checkCudaErrors(cudaFree(0));
 
       cv::Mat image = cv::imread(filename.c_str(), CV_LOAD_IMAGE_COLOR);
@@ -81,7 +80,7 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
       }
       cv::cvtColor(image, imageInputRGBA, CV_BGR2RGBA);
 
-      //allocate memory for the output
+      // Allocate memory for the output...
       imageOutputRGBA.create(image.rows, image.cols, CV_8UC4);
 
       // This shouldn't ever happen given the way the images are created
@@ -90,11 +89,11 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
             std::cerr << "Images aren't continuous!! Exiting." << std::endl;
             exit(1);
       }
-
       *h_inputImageRGBA  = (uchar4 *) imageInputRGBA.ptr<unsigned char>(0);
       *h_outputImageRGBA = (uchar4 *) imageOutputRGBA.ptr<unsigned char>(0);
 
       const size_t numPixels = numRows() * numCols();
+
       // Allocate memory on the device for both input and output...
       checkCudaErrors(cudaMalloc(d_inputImageRGBA, sizeof(uchar4) * numPixels));
       checkCudaErrors(cudaMalloc(d_outputImageRGBA, sizeof(uchar4) * numPixels));
@@ -110,12 +109,12 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
 
       h_filter__ = *h_filter;
 
-      checkCudaErrors(cudaMalloc(d_redFiltered,    sizeof(unsigned char) * numPixels));
-      checkCudaErrors(cudaMalloc(d_greenFiltered,  sizeof(unsigned char) * numPixels));
-      checkCudaErrors(cudaMalloc(d_blueFiltered,   sizeof(unsigned char) * numPixels));
-      checkCudaErrors(cudaMemset(*d_redFiltered,   0, sizeof(unsigned char) * numPixels));
+      checkCudaErrors(cudaMalloc(d_redFiltered, sizeof(unsigned char) * numPixels));
+      checkCudaErrors(cudaMalloc(d_greenFiltered, sizeof(unsigned char) * numPixels));
+      checkCudaErrors(cudaMalloc(d_blueFiltered, sizeof(unsigned char) * numPixels));
+      checkCudaErrors(cudaMemset(*d_redFiltered, 0, sizeof(unsigned char) * numPixels));
       checkCudaErrors(cudaMemset(*d_greenFiltered, 0, sizeof(unsigned char) * numPixels));
-      checkCudaErrors(cudaMemset(*d_blueFiltered,  0, sizeof(unsigned char) * numPixels));
+      checkCudaErrors(cudaMemset(*d_blueFiltered, 0, sizeof(unsigned char) * numPixels));
 }
 
 void postProcess(const std::string& output_file, uchar4* data_ptr) {
@@ -142,33 +141,30 @@ void generateReferenceImage(std::string input_file, std::string reference_file, 
 {
 	cv::Mat input = cv::imread(input_file);
 
-	// Create an identical image for the output as a placeholder.
+	// Create an identical image for the output as a placeholder...
 	cv::Mat reference = cv::imread(input_file);
 	cv::GaussianBlur(input, reference, cv::Size2i(kernel_size, kernel_size),0);
 	cv::imwrite(reference_file, reference);
 }
 
-void debug_image(char *filename, unsigned char *pixels, int rows, int cols)
+void debug_image(char *filename, unsigned char *pixels)
 {
       cv::Mat output(numRows(), numCols(), CV_8UC1, (void*) pixels);
-
-//      cv::Mat imageOutputBGR;
-//      cv::cvtColor(output, imageOutputBGR, CV_RGBA2BG);
 
       // Output the image...
       cv::imwrite(filename, output);
 }
 
-void debug_devices_data(char *filename, unsigned char *d_data, int rows, int cols)
+void debug_devices_data(char *filename, unsigned char *d_data)
 {
-      int size = sizeof(unsigned char) * rows * cols;
+      int size = sizeof(unsigned char) * numRows() * numCols();
       unsigned char *h_data = (unsigned char*) malloc(size);
       if (!h_data) {
             std::cerr << "Error allocating memory to debug image..." << strerror(errno) << '\n';
             exit(1);
       }
       cudaMemcpy(h_data, d_data, size, cudaMemcpyDeviceToHost);
-      debug_image(filename, h_data, rows, cols);
+      debug_image(filename, h_data);
       free(h_data);
 }
 
@@ -212,11 +208,9 @@ int main(int argc, char **argv) {
       timer.Start();
 
       // call the students' code...
-      convolution(h_inputImageRGBA, d_inputImageRGBA, d_outputImageRGBA, numRows(), numCols(), d_redFiltered, d_greenFiltered, d_blueFiltered,
-                  filterWidth);
+      convolution(d_inputImageRGBA, d_outputImageRGBA, numRows(), numCols(), d_redFiltered, d_greenFiltered, d_blueFiltered, filterWidth);
 
-      debug_devices_data("red.png", d_redFiltered, numRows(), numCols());
-
+      debug_devices_data("red.png", d_redFiltered);
       timer.Stop();
 
       cudaDeviceSynchronize();
