@@ -128,23 +128,61 @@ void allocateMemoryAndCopyToGPU(const size_t numRowsImage, const size_t numColsI
 }
 
 // Crear el filtro se que va a aplicar (en CPU) y almacenar su tamaño...
-void create_filter(float **h_filter, int *filterWidth)
+void create_filter(float **d_filter, const float *mask, const int size)
 {
-      float *filter = (float *) malloc(sizeof(float) * FILTER_WIDTH * FILTER_WIDTH);
+      float *h_filter = (float *) malloc(sizeof(float) * size);
       if (!h_filter) {
             std::cerr << "Error creating filter.." << strerror(errno) << '\n';
             exit(1);
       }
-      float mask[] = {
-            -1.0f, -1.0f, -1.0f,
-            -1.0f,  8.0f, -1.0f,
-            -1.0f, -1.0f, -1.0f
-      };
-      for (int i = 0; i < FILTER_WIDTH * FILTER_WIDTH; ++i) {
-            filter[i] = mask[i] * 10.0f;
+      for (int i = 0; i < size; ++i) {
+            h_filter[i] = mask[i];
       }
-      *h_filter = filter;
-      *filterWidth = FILTER_WIDTH;
+
+      cudaMalloc(d_filter, sizeof(float) * size);
+      cudaMemcpy(*d_filter, h_filter, sizeof(float) * size, cudaMemcpyHostToDevice);
+}
+
+void open_mpi_separate_channels(uchar4* const d_inputImageRGBA,
+                                    const size_t numRows,
+                                    const size_t numCols,
+                                    unsigned char *d_red,
+                                    unsigned char *d_green,
+                                    unsigned char *d_blue)
+{
+      const dim3 blockSize(NTHREADS, NTHREADS, 1);
+      const dim3 gridSize((numCols - 1) / blockSize.x + 1, (numRows - 1) / blockSize.y + 1, 1);
+
+      separateChannels<<<gridSize, blockSize>>>(d_inputImageRGBA, numRows, numCols, d_red,  d_green, d_blue);
+      cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+}
+
+void open_mpi_box_filter(const unsigned char *channel,
+                        unsigned char *filter_channel,
+                        const size_t numRows,
+                        const size_t numCols,
+                        float* d_filter,
+                        const int filterWidth)
+{
+      const dim3 blockSize(NTHREADS, NTHREADS, 1);
+      const dim3 gridSize((numCols - 1) / blockSize.x + 1, (numRows - 1) / blockSize.y + 1, 1);
+
+      box_filter<<<gridSize, blockSize>>>(channel, filter_channel, numRows, numCols, d_filter, filterWidth);
+      cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+}
+
+void open_mpi_recombine_channels(const unsigned char* d_redFiltered,
+                                    const unsigned char* d_greenFiltered,
+                                    const unsigned char* d_blueFiltered,
+                                    uchar4* const d_outputImageRGBA,
+                                    const size_t numRows,
+                                    const size_t numCols)
+{
+      const dim3 blockSize(NTHREADS, NTHREADS, 1);
+      const dim3 gridSize((numCols - 1) / blockSize.x + 1, (numRows - 1) / blockSize.y + 1, 1);
+
+      recombineChannels<<<gridSize, blockSize>>>(d_redFiltered, d_greenFiltered, d_blueFiltered, d_outputImageRGBA, numRows, numCols);
+      cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 }
 
 void convolution(uchar4* const d_inputImageRGBA,

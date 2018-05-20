@@ -9,6 +9,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
 #include "timer.h"
+#include <mpi.h>
 
 cv::Mat imageInputRGBA;
 cv::Mat imageOutputRGBA;
@@ -16,13 +17,13 @@ cv::Mat imageOutputRGBA;
 uchar4 *d_inputImageRGBA__;
 uchar4 *d_outputImageRGBA__;
 
-float *h_filter__;
+const int SIZE_FILTER = 25;
 
 size_t numRows() { return imageInputRGBA.rows; }
 size_t numCols() { return imageInputRGBA.cols; }
 
 /*******  DEFINED IN func.cu *********/
-void create_filter(float **h_filter, int *filterWidth);
+void create_filter(float **h_filter, const float *mask, const int size);
 
 void convolution(uchar4 * const d_inputImageRGBA, uchar4* const d_outputImageRGBA,
                         const size_t numRows, const size_t numCols,
@@ -32,6 +33,27 @@ void convolution(uchar4 * const d_inputImageRGBA, uchar4* const d_outputImageRGB
                         const int filterWidth);
 
 void allocateMemoryAndCopyToGPU(const size_t numRowsImage, const size_t numColsImage, const float* const h_filter, const size_t filterWidth);
+
+void open_mpi_separate_channels(uchar4* const d_inputImageRGBA,
+                                    const size_t numRows,
+                                    const size_t numCols,
+                                    unsigned char *d_red,
+                                    unsigned char *d_green,
+                                    unsigned char *d_blue);
+
+void open_mpi_box_filter(const unsigned char *channel,
+                        unsigned char *filter_channel,
+                        const size_t numRows,
+                        const size_t numCols,
+                        float* d_filter,
+                        const int filterWidth);
+
+void open_mpi_recombine_channels(const unsigned char* d_redFiltered,
+                                    const unsigned char* d_greenFiltered,
+                                    const unsigned char* d_blueFiltered,
+                                    uchar4* const d_outputImageRGBA,
+                                    const size_t numRows,
+                                    const size_t numCols);
 
 // ****************************************************************************
 // Also note that we've supplied a helpful debugging function called checkCudaErrors.
@@ -67,7 +89,6 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
                 unsigned char **d_redFiltered,
                 unsigned char **d_greenFiltered,
                 unsigned char **d_blueFiltered,
-                float **h_filter, int *filterWidth,
                 const std::string &filename)
 {
       // make sure the context initializes ok...
@@ -105,10 +126,6 @@ void preProcess(uchar4 **h_inputImageRGBA, uchar4 **h_outputImageRGBA,
       d_inputImageRGBA__  = *d_inputImageRGBA;
       d_outputImageRGBA__ = *d_outputImageRGBA;
 
-      create_filter(h_filter, filterWidth);
-
-      h_filter__ = *h_filter;
-
       checkCudaErrors(cudaMalloc(d_redFiltered, sizeof(unsigned char) * numPixels));
       checkCudaErrors(cudaMalloc(d_greenFiltered, sizeof(unsigned char) * numPixels));
       checkCudaErrors(cudaMalloc(d_blueFiltered, sizeof(unsigned char) * numPixels));
@@ -131,9 +148,7 @@ void cleanUp(void)
 {
       cudaFree(d_inputImageRGBA__);
       cudaFree(d_outputImageRGBA__);
-      delete[] h_filter__;
 }
-
 
 // An unused bit of code showing how to accomplish this assignment using OpenCV.  It is much faster
 //    than the naive implementation in reference_calc.cpp.
@@ -168,19 +183,132 @@ void debug_devices_data(char *filename, unsigned char *d_data)
       free(h_data);
 }
 
+void sendDataUchar(const unsigned char *data_device, const int size, const int id)
+{
+      MPI_Send(data_device, size, MPI::UNSIGNED_CHAR, id, 0, MPI_COMM_WORLD);
+}
+
+void receiveDataUchar(unsigned char* data_device, const int size, const int id)
+{
+      MPI_Status stat;
+
+      MPI_Recv(data_device, size, MPI::UNSIGNED_CHAR, id, 0, MPI_COMM_WORLD, &stat);
+}
+
+void sendFilter(const float *d_filter, const int size, const int id)
+{
+      MPI_Send(d_filter, size, MPI::FLOAT, id, 0, MPI_COMM_WORLD);
+}
+
+void receiveFilter(float* d_filter, const int size, const int id)
+{
+      MPI_Status stat;
+
+      MPI_Recv(d_filter, size, MPI::FLOAT, id, 0, MPI_COMM_WORLD, &stat);
+}
+
+void master(uchar4 *const d_inputImageRGBA, uchar4 *const d_outputImageRGBA,
+                        unsigned char *d_red,
+                        unsigned char *d_green,
+                        unsigned char *d_blue)
+{
+      float *d_filter;
+      const float mask[] = {
+             0.0f,  0.0f, -1.0,   0.0f,  0.0f,
+             0.0f, -1.0f, -2.0f, -1.0f,  0.0f,
+            -1.0f, -2.0f, 16.0f, -2.0f, -1.0f,
+             0.0f, -1.0f, -2.0f, -1.0f,  0.0f,
+             0.0f,  0.0f, -1.0, 0.0f, 0.0f
+      };
+
+      create_filter(&d_filter, mask, SIZE_FILTER);
+      open_mpi_separate_channels(d_inputImageRGBA, numRows(), numCols(), d_red, d_green, d_blue);
+
+      sendDataUchar(d_red, numRows() * numCols(), 1);
+      sendFilter(d_filter, SIZE_FILTER, 1);
+
+      sendDataUchar(d_green, numRows() * numCols(), 2);
+      sendFilter(d_filter, SIZE_FILTER, 2);
+
+      sendDataUchar(d_blue, numRows() * numCols(), 3);
+      sendFilter(d_filter, SIZE_FILTER, 3);
+
+      receiveDataUchar(d_red, numRows() * numCols(), 1);
+      receiveDataUchar(d_green, numRows() * numCols(), 2);
+      receiveDataUchar(d_blue, numRows() * numCols(), 3);
+
+      open_mpi_recombine_channels(d_red, d_green, d_blue, d_outputImageRGBA, numRows(), numCols());
+}
+
+
+
+void slave_channel_filter(int id)
+{
+      unsigned char *d_channel;
+      unsigned char *d_channel_filtered;
+      float *d_filter;
+      unsigned sizeImage = sizeof(unsigned char) * numCols() * numRows();
+
+      fprintf(stderr, "Node channel... : %d\n", id);
+      cudaMalloc(&d_channel_filtered, sizeImage);
+      cudaMalloc(&d_channel, sizeImage);
+      cudaMalloc(&d_filter, sizeof(float) * SIZE_FILTER);
+      cudaMemset(d_channel_filtered, 0, sizeImage);
+
+      receiveDataUchar(d_channel, numRows() * numCols(), 0);
+      receiveFilter(d_filter, SIZE_FILTER, 0);
+
+      open_mpi_box_filter(d_channel, d_channel_filtered, numRows(), numCols(), d_filter, SIZE_FILTER);
+
+      sendDataUchar(d_channel_filtered, numRows() * numCols(), 0);
+
+      char debug_msg[512];
+      sprintf(debug_msg, "channel_%d.png", id);
+      debug_devices_data(debug_msg, d_channel_filtered);
+      cudaFree(d_channel);
+}
+
+int mpi_comm_devices(int argc, char* argv[],
+                        uchar4 *const d_inputImageRGBA,
+                        uchar4 *const d_outputImageRGBA,
+                        unsigned char *d_redFiltered,
+                        unsigned char *d_greenFiltered,
+                        unsigned char *d_blueFiltered)
+{
+      int id;
+      int numprocs;
+
+      MPI_Init(&argc, &argv);
+      MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
+      MPI_Comm_rank(MPI_COMM_WORLD, &id);
+
+      MPI_Barrier(MPI_COMM_WORLD); // Wait all process ready...
+      if (id == 0) {
+            master(d_inputImageRGBA, d_outputImageRGBA, d_redFiltered, d_greenFiltered, d_blueFiltered);
+      } else {
+            slave_channel_filter(id);
+      }
+      return id;
+}
+
+void write_results(uchar4 *h_outputImageRGBA, uchar4 *d_outputImageRGBA, std::string output_file) {
+      size_t numPixels = numRows() * numCols();
+
+      checkCudaErrors(cudaMemcpy(h_outputImageRGBA, d_outputImageRGBA, sizeof(uchar4) * numPixels, cudaMemcpyDeviceToHost));
+      postProcess(output_file, h_outputImageRGBA);
+}
+
 /*******  Begin main *********/
 int main(int argc, char **argv) {
       uchar4 *h_inputImageRGBA, *d_inputImageRGBA;
       uchar4 *h_outputImageRGBA, *d_outputImageRGBA;
       unsigned char *d_redFiltered, *d_greenFiltered, *d_blueFiltered;
 
-      float *h_filter;
-      int filterWidth;
 
       std::string input_file;
       std::string output_file;
       std::string reference_file;
-      bool useEpsCheck = false;
+
       switch (argc)
       {
             case 2:
@@ -198,19 +326,14 @@ int main(int argc, char **argv) {
             exit(1);
       }
       // Load the image and give us our input and output pointers
-      preProcess(&h_inputImageRGBA, &h_outputImageRGBA, &d_inputImageRGBA, &d_outputImageRGBA,
-                  &d_redFiltered, &d_greenFiltered, &d_blueFiltered,
-                  &h_filter, &filterWidth, input_file);
-
-      allocateMemoryAndCopyToGPU(numRows(), numCols(), h_filter, filterWidth);
+      preProcess(&h_inputImageRGBA, &h_outputImageRGBA, &d_inputImageRGBA, &d_outputImageRGBA, &d_redFiltered, &d_greenFiltered, &d_blueFiltered,
+            input_file);
 
       GpuTimer timer;
       timer.Start();
 
-      // call the students' code...
-      convolution(d_inputImageRGBA, d_outputImageRGBA, numRows(), numCols(), d_redFiltered, d_greenFiltered, d_blueFiltered, filterWidth);
+      int id = mpi_comm_devices(argc, argv, d_inputImageRGBA, d_outputImageRGBA, d_redFiltered, d_greenFiltered, d_blueFiltered);
 
-      debug_devices_data("red.png", d_redFiltered);
       timer.Stop();
 
       cudaDeviceSynchronize();
@@ -218,21 +341,18 @@ int main(int argc, char **argv) {
 
       int err = printf("Your code ran in: %f msecs.\n", timer.Elapsed());
       if (err < 0) {
-            // Couldn't print! Probably the student closed stdout - bad news...
             std::cerr << "Couldn't print timing information! STDOUT Closed!" << std::endl;
             exit(1);
       }
 
-      // Write results...
-      size_t numPixels = numRows() * numCols();
-
-      // Copy the output back to the host...
-      checkCudaErrors(cudaMemcpy(h_outputImageRGBA, d_outputImageRGBA__, sizeof(uchar4) * numPixels, cudaMemcpyDeviceToHost));
-      postProcess(output_file, h_outputImageRGBA);
+      if (id == 0) {
+            write_results(h_outputImageRGBA, d_outputImageRGBA, output_file);
+      }
 
       checkCudaErrors(cudaFree(d_redFiltered));
       checkCudaErrors(cudaFree(d_greenFiltered));
       checkCudaErrors(cudaFree(d_blueFiltered));
       cleanUp();
+      MPI_Finalize();
       return 0;
 }
